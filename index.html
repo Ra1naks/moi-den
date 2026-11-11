@@ -88,7 +88,8 @@ section.block{display:flex;flex-direction:column;gap:6px}
 .row .t{font-weight:600;overflow-wrap:anywhere}
 .row .meta{font-size:12px;color:var(--muted);font-weight:600}
 .row.done .t{text-decoration:line-through;color:var(--muted)}
-.time{font-size:13px;font-weight:600;color:var(--accent);min-width:46px}
+.time{font-size:13px;font-weight:600;color:var(--accent);min-width:46px;display:flex;flex-direction:column;line-height:1.25}
+.time small{font-size:12px;color:var(--muted);font-weight:500}
 .amount{font-weight:600;color:var(--money);white-space:nowrap}
 .check{width:24px;height:24px;border-radius:8px;border:2px solid var(--line);flex:none;display:grid;place-items:center}
 .check[aria-checked="true"]{background:var(--accent);border-color:var(--accent)}
@@ -180,8 +181,9 @@ label.f{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:70
       <input id="fText" type="text" placeholder="Например: встреча с куратором" maxlength="200">
     </label>
     <div class="two" id="rowEvent">
-      <label class="f">Время<input id="fTime" type="time"></label>
-      <label class="f">День<input id="fDate" type="date"></label>
+      <label class="f" id="lblFrom">С<input id="fTime" type="time"></label>
+      <label class="f" id="lblTo">До<input id="fTimeEnd" type="time"></label>
+      <label class="f" style="grid-column:1/-1">День<input id="fDate" type="date"></label>
     </div>
     <div class="two" id="rowExpense" hidden>
       <label class="f">Сумма, ₽<input id="fAmount" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0"></label>
@@ -356,7 +358,8 @@ label.f{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:70
 
     const evs = pick(events), tks = pick(tasks), exs = pick(exps);
     if (show("event") && evs.length) html += `<section class="block"><h2>Расписание <em class="mono">${evs.length}</em></h2><div class="list">` +
-      evs.map(x => row(x, `<span class="time mono">${esc(x.time || "—")}</span>`, "", repMeta(x))).join("") + `</div></section>`;
+      evs.map(x => row(x, `<span class="time mono">${esc(x.time || "—")}${x.timeEnd ? `<small>до ${esc(x.timeEnd)}</small>` : ""}</span>`, "",
+        [durText(x), repMeta(x)].filter(Boolean).join(" · "))).join("") + `</div></section>`;
     if (show("task") && tks.length) html += `<section class="block"><h2>Дела <em class="mono">${tks.filter(t=>t.done).length}/${tks.length}</em></h2><div class="list">` +
       tks.map(x => row(x, `<button type="button" class="check" role="checkbox" aria-checked="${!!x.done}" data-check="${x.id}" data-k="${x._k || sel}" aria-label="Сделано">${ICON_CHECK}</button>`, "",
         x.carry ? (x._k ? `↻ переносится с ${dateOf(x._k).toLocaleDateString("ru-RU",{day:"numeric",month:"short"})}` : "↻ переносится, пока не сделаю") : repMeta(x))).join("") + `</div></section>`;
@@ -379,6 +382,14 @@ label.f{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:70
 
   const REP = { d1: "каждый день", wd: "по будням", w1: "каждую неделю", w2: "через неделю" };
   const repMeta = x => x.rep && REP[x.repKind] ? "↻ " + REP[x.repKind] : "";
+  const mins = t => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
+  function durText(x) {
+    if (!x.time || !x.timeEnd) return "";
+    const d = mins(x.timeEnd) - mins(x.time);
+    if (d <= 0) return "";
+    const h = Math.floor(d / 60), m = d % 60;
+    return (h ? h + " ч" : "") + (h && m ? " " : "") + (m ? m + " мин" : "");
+  }
   function row(x, lead, tail, meta) {
     const k = x._k || state.sel;
     return `<div class="row${x.hot ? " hot" : ""}${x.done ? " done" : ""}">${lead}
@@ -400,8 +411,7 @@ label.f{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:70
     state.formType = t;
     document.querySelectorAll("#typeSeg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.t === t)));
     $("#rowExpense").hidden = t !== "expense";
-    $("#fTime").parentElement.hidden = t !== "event";
-    $("#rowEvent").style.gridTemplateColumns = t === "event" ? "1fr 1fr" : "1fr";
+    $("#lblFrom").hidden = $("#lblTo").hidden = t !== "event";
     syncExtras();
     $("#fText").placeholder = { event: "Например: пара по матану", task: "Например: сдать отчёт", expense: "Например: обед" }[t];
   }
@@ -433,6 +443,7 @@ label.f{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:70
     setType(t);
     $("#fText").value = item ? item.text || "" : "";
     $("#fTime").value = item ? item.time || "" : "";
+    $("#fTimeEnd").value = item ? item.timeEnd || "" : "";
     $("#fDate").value = key || state.sel;
     $("#fAmount").value = item && item.amount != null ? item.amount : "";
     $("#fCat").value = item && item.cat ? item.cat : "Еда";
@@ -448,6 +459,9 @@ label.f{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:70
     const amount = parseFloat(String($("#fAmount").value).replace(",", "."));
     if (t === "expense" && !(amount > 0)) { toast("Укажи сумму"); $("#fAmount").focus(); return; }
     if (t !== "expense" && !text) { toast("Напиши, что запланировано"); $("#fText").focus(); return; }
+    const tFrom = $("#fTime").value, tTo = $("#fTimeEnd").value;
+    if (t === "event" && tTo && !tFrom) { toast("Укажи, со скольки"); $("#fTime").focus(); return; }
+    if (t === "event" && tFrom && tTo && tTo <= tFrom) { toast("Время «до» должно быть позже, чем «с»"); $("#fTimeEnd").focus(); return; }
     const key = $("#fDate").value || state.sel;
     const ed = state.editing;
     let prev = null;
@@ -458,7 +472,7 @@ label.f{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:70
     }
     const item = { id: ed ? ed.id : uid(), type: t, text, hot: $("#fHot").checked, done: prev && t === "task" ? !!prev.done : false };
     if (prev && prev.doneOn) item.doneOn = prev.doneOn;
-    if (t === "event") item.time = $("#fTime").value;
+    if (t === "event") { item.time = tFrom; if (tTo) item.timeEnd = tTo; }
     if (t === "expense") { item.amount = Math.round(amount * 100) / 100; item.cat = $("#fCat").value; }
     if (t === "task" && $("#fCarry").checked) item.carry = true;
     if (prev && prev.rep) { item.rep = prev.rep; item.repKind = prev.repKind; }
@@ -477,7 +491,7 @@ label.f{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:70
 
     if (ed && prev && prev.rep && $("#fAll").checked) {
       const fields = { text: item.text, hot: item.hot, type: item.type };
-      if (t === "event") fields.time = item.time;
+      if (t === "event") { fields.time = item.time; fields.timeEnd = item.timeEnd || ""; }
       if (t === "expense") { fields.amount = item.amount; fields.cat = item.cat; }
       let n = 0;
       Object.keys(state.days).forEach(k => {
